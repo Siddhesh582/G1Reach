@@ -1,228 +1,153 @@
 """
-training/rollout_buffer.py
---------------------------
-Stores one rollout (num_steps × num_envs transitions) and computes
-Generalized Advantage Estimation (GAE) returns for PPO updates.
+training/rollout_buffer.py — On-policy rollout buffer with GAE
 
-Usage:
-    buf = RolloutBuffer(num_steps=24, num_envs=256, obs_dim=32,
-                        action_dim=13, device=device, cfg=G1Config().ppo)
-    # collect:
-    for t in range(num_steps):
-        buf.add(obs, action, log_prob, reward, done, value)
-    buf.compute_returns(last_value)
-    # iterate mini-batches:
-    for batch in buf.mini_batches():
-        ...
-    buf.reset()
+Stores transitions from num_envs parallel environments over rollout_steps,
+then computes returns and advantages using Generalized Advantage Estimation.
+
+Buffer layout (per field): [rollout_steps, num_envs, ...]
+After compute_returns(): advantages and returns are ready for mini-batch sampling.
 """
 
-from __future__ import annotations
-
+import numpy as np
 import torch
-from typing import Iterator
+from typing import Generator, Tuple, Dict
 
-import sys, os
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
-from config import PPOConfig
+from config import G1Config
 
 
 class RolloutBuffer:
     """
-    Fixed-size circular buffer for one PPO rollout.
-
-    Stores raw transitions then computes GAE advantages and
-    discounted returns in a single vectorised pass over all envs.
+    Stores a single rollout of experience across multiple parallel environments.
+    Supports GAE advantage computation and random mini-batch iteration.
     """
 
-    def __init__(
-        self,
-        num_steps:  int,
-        num_envs:   int,
-        obs_dim:    int,
-        action_dim: int,
-        device:     torch.device | str,
-        cfg:        PPOConfig,
-    ):
-        self.num_steps  = num_steps
-        self.num_envs   = num_envs
-        self.obs_dim    = obs_dim
-        self.action_dim = action_dim
-        self.device     = device
-        self.gamma      = cfg.gamma
-        self.lam        = cfg.lam
-        self.num_mini_batches = cfg.num_mini_batches
+    def __init__(self, cfg: G1Config, device: torch.device):
+        self.cfg     = cfg
+        self.device  = device
+        self.T       = cfg.rollout_steps   # steps per env
+        self.N       = cfg.num_envs        # parallel envs
+        self.obs_dim = cfg.obs_dim
+        self.act_dim = cfg.action_dim
 
-        self._ptr = 0       # current insertion index
-        self._ready = False # True after compute_returns() is called
+        self._init_buffers()
+        self.ptr = 0   # current write position (step index)
+        self.full = False
 
-        self._alloc()
-
-    # ------------------------------------------------------------------
-    # Allocation
-    # ------------------------------------------------------------------
-
-    def _alloc(self):
-        """Pre-allocate all storage tensors once."""
-        S, N = self.num_steps, self.num_envs
-        d    = self.device
-
-        self.obs      = torch.zeros((S, N, self.obs_dim),    device=d)
-        self.actions  = torch.zeros((S, N, self.action_dim), device=d)
-        self.log_probs= torch.zeros((S, N),                  device=d)
-        self.rewards  = torch.zeros((S, N),                  device=d)
-        self.dones    = torch.zeros((S, N),                  device=d)
-        self.values   = torch.zeros((S, N),                  device=d)
-
-        # Filled by compute_returns()
-        self.advantages = torch.zeros((S, N), device=d)
-        self.returns    = torch.zeros((S, N), device=d)
-
-    def reset(self):
-        """Clear the buffer for the next rollout. Does NOT reallocate."""
-        self._ptr   = 0
-        self._ready = False
-
-    # ------------------------------------------------------------------
-    # Data insertion
-    # ------------------------------------------------------------------
+    def _init_buffers(self):
+        T, N = self.T, self.N
+        self.obs       = np.zeros((T, N, self.obs_dim), dtype=np.float32)
+        self.actions   = np.zeros((T, N, self.act_dim), dtype=np.float32)
+        self.rewards   = np.zeros((T, N),               dtype=np.float32)
+        self.values    = np.zeros((T, N),               dtype=np.float32)
+        self.log_probs = np.zeros((T, N),               dtype=np.float32)
+        self.dones     = np.zeros((T, N),               dtype=np.float32)
+        # Filled after compute_returns()
+        self.advantages = np.zeros((T, N),              dtype=np.float32)
+        self.returns    = np.zeros((T, N),              dtype=np.float32)
 
     def add(
         self,
-        obs:      torch.Tensor,   # (N, obs_dim)
-        action:   torch.Tensor,   # (N, action_dim)
-        log_prob: torch.Tensor,   # (N,)
-        reward:   torch.Tensor,   # (N,)
-        done:     torch.Tensor,   # (N,)  bool or float
-        value:    torch.Tensor,   # (N,)
+        obs:      np.ndarray,   # (N, obs_dim)
+        action:   np.ndarray,   # (N, act_dim)
+        reward:   np.ndarray,   # (N,)
+        value:    np.ndarray,   # (N,)
+        log_prob: np.ndarray,   # (N,)
+        done:     np.ndarray,   # (N,)
     ):
-        """Insert one timestep of data from all envs."""
-        assert self._ptr < self.num_steps, \
-            "Buffer full — call compute_returns() then reset() first."
+        assert self.ptr < self.T, "Buffer is full; call reset() before adding."
+        t = self.ptr
+        self.obs[t]       = obs
+        self.actions[t]   = action
+        self.rewards[t]   = reward
+        self.values[t]    = value
+        self.log_probs[t] = log_prob
+        self.dones[t]     = done
+        self.ptr += 1
+        if self.ptr == self.T:
+            self.full = True
 
-        t = self._ptr
-        self.obs[t]       = obs.detach()
-        self.actions[t]   = action.detach()
-        self.log_probs[t] = log_prob.detach()
-        self.rewards[t]   = reward.detach()
-        self.dones[t]     = done.float().detach()
-        self.values[t]    = value.detach()
-
-        self._ptr += 1
-
-    # ------------------------------------------------------------------
-    # GAE computation
-    # ------------------------------------------------------------------
-
-    def compute_returns(self, last_value: torch.Tensor):
+    def compute_returns(self, last_values: np.ndarray, last_dones: np.ndarray):
         """
         Compute GAE advantages and discounted returns.
 
-        Must be called after all num_steps have been added, passing
-        V(s_{T+1}) — the critic's estimate of the value of the state
-        AFTER the last collected step (bootstrapping for non-terminal envs).
-
-        Args:
-            last_value : (N,) — critic value of the state after last step
+        last_values: (N,) — V(s_{T}) bootstrap from critic
+        last_dones:  (N,) — whether last state is terminal
         """
-        assert self._ptr == self.num_steps, \
-            f"Buffer not full: {self._ptr}/{self.num_steps} steps added."
+        gamma      = self.cfg.gamma
+        gae_lambda = self.cfg.gae_lambda
 
-        gae = torch.zeros(self.num_envs, device=self.device)
+        last_gae = np.zeros(self.N, dtype=np.float32)
 
-        for t in reversed(range(self.num_steps)):
-            # Bootstrap from last_value on the final step
-            next_val   = last_value if t == self.num_steps - 1 \
-                         else self.values[t + 1]
-            next_done  = self.dones[t]                  # 1.0 if episode ended
+        for t in reversed(range(self.T)):
+            if t == self.T - 1:
+                next_non_terminal = 1.0 - last_dones.astype(np.float32)
+                next_values       = last_values
+            else:
+                next_non_terminal = 1.0 - self.dones[t + 1]
+                next_values       = self.values[t + 1]
 
-            # TD error: δ_t = r_t + γ V(s_{t+1}) (1 - done) - V(s_t)
+            # TD error δ_t = r_t + γ * V(s_{t+1}) * (1 - done) - V(s_t)
             delta = (
                 self.rewards[t]
-                + self.gamma * next_val * (1.0 - next_done)
+                + gamma * next_values * next_non_terminal
                 - self.values[t]
             )
+            # A_t = δ_t + γλ * (1 - done) * A_{t+1}
+            last_gae = delta + gamma * gae_lambda * next_non_terminal * last_gae
+            self.advantages[t] = last_gae
 
-            # GAE: A_t = δ_t + γλ (1-done) A_{t+1}
-            gae = delta + self.gamma * self.lam * (1.0 - next_done) * gae
+        self.returns = self.advantages + self.values
 
-            self.advantages[t] = gae
-            self.returns[t]    = gae + self.values[t]
+    def reset(self):
+        self.ptr  = 0
+        self.full = False
 
-        # Normalise advantages across the whole rollout batch
-        # (across all steps and envs) for stable PPO updates
-        adv_flat = self.advantages.reshape(-1)
-        self.advantages = (
-            (self.advantages - adv_flat.mean()) /
-            (adv_flat.std() + 1e-8)
-        )
-
-        self._ready = True
-
-    # ------------------------------------------------------------------
+    # ─────────────────────────────────────────────────────────────────────────
     # Mini-batch iteration
-    # ------------------------------------------------------------------
+    # ─────────────────────────────────────────────────────────────────────────
 
-    def mini_batches(
+    def get_mini_batches(
         self,
-    ) -> Iterator[dict[str, torch.Tensor]]:
+        batch_size: int,
+        normalize_advantages: bool = True,
+    ) -> Generator[Dict[str, torch.Tensor], None, None]:
         """
-        Yield shuffled mini-batches for PPO update epochs.
-
-        Flattens the (num_steps, num_envs) dimensions into a single
-        batch axis, then splits into num_mini_batches chunks.
-
-        Yields dicts with keys:
-            obs, actions, log_probs_old, advantages, returns
+        Flatten [T, N] → [T*N] and yield random mini-batches of size batch_size.
+        Normalizes advantages within each full rollout (not per mini-batch).
         """
-        assert self._ready, "Call compute_returns() before iterating mini-batches."
+        assert self.full, "Buffer must be full before iterating mini-batches."
 
-        total = self.num_steps * self.num_envs
-        mb_sz = total // self.num_mini_batches
+        total = self.T * self.N
 
-        # Flatten step × env into a single batch dimension
-        obs_f       = self.obs.reshape(total, self.obs_dim)
-        act_f       = self.actions.reshape(total, self.action_dim)
-        lp_f        = self.log_probs.reshape(total)
-        adv_f       = self.advantages.reshape(total)
-        ret_f       = self.returns.reshape(total)
+        # Flatten
+        obs_flat       = self.obs.reshape(total, self.obs_dim)
+        actions_flat   = self.actions.reshape(total, self.act_dim)
+        log_probs_flat = self.log_probs.reshape(total)
+        advantages_flat = self.advantages.reshape(total)
+        returns_flat   = self.returns.reshape(total)
+        values_flat    = self.values.reshape(total)
 
-        # Random permutation for each call (i.e. each PPO epoch)
-        idx = torch.randperm(total, device=self.device)
+        # Normalize advantages over the whole rollout
+        if normalize_advantages:
+            adv_mean = advantages_flat.mean()
+            adv_std  = advantages_flat.std() + 1e-8
+            advantages_flat = (advantages_flat - adv_mean) / adv_std
 
-        for start in range(0, total, mb_sz):
-            mb_idx = idx[start: start + mb_sz]
+        # Shuffle & yield
+        indices = np.random.permutation(total)
+        start = 0
+        while start < total:
+            end = min(start + batch_size, total)
+            idx = indices[start:end]
             yield {
-                "obs":           obs_f[mb_idx],
-                "actions":       act_f[mb_idx],
-                "log_probs_old": lp_f[mb_idx],
-                "advantages":    adv_f[mb_idx],
-                "returns":       ret_f[mb_idx],
+                "obs":        torch.tensor(obs_flat[idx],       device=self.device),
+                "actions":    torch.tensor(actions_flat[idx],   device=self.device),
+                "log_probs":  torch.tensor(log_probs_flat[idx], device=self.device),
+                "advantages": torch.tensor(advantages_flat[idx],device=self.device),
+                "returns":    torch.tensor(returns_flat[idx],   device=self.device),
+                "values":     torch.tensor(values_flat[idx],    device=self.device),
             }
+            start = end
 
-    # ------------------------------------------------------------------
-    # Diagnostics
-    # ------------------------------------------------------------------
-
-    @property
-    def mean_reward(self) -> float:
-        return self.rewards.mean().item()
-
-    @property
-    def mean_value(self) -> float:
-        return self.values.mean().item()
-
-    @property
-    def explained_variance(self) -> float:
-        """
-        Fraction of return variance explained by the value function.
-        Close to 1.0 = critic is well-calibrated.
-        Close to 0.0 = critic is not learning.
-        Negative     = critic is worse than a constant baseline.
-        """
-        ret_f = self.returns.reshape(-1)
-        val_f = self.values.reshape(-1)
-        var_ret = ret_f.var()
-        if var_ret < 1e-8:
-            return float("nan")
-        return (1.0 - (ret_f - val_f).var() / var_ret).item()
+    def num_samples(self) -> int:
+        return self.T * self.N
