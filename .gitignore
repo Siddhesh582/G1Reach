@@ -1,0 +1,20 @@
+# Training outputs (can be large)
+logs/
+checkpoints/
+__pycache__/
+*.pyc
+*.pyo
+*.pt
+*.pth
+
+# Python env
+*.egg-info/
+.env
+.venv
+
+# Editor
+.vscode/
+.idea/
+
+# OS
+.DS_Store
