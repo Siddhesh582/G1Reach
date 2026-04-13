@@ -1,0 +1,31 @@
+# config.py — fields to update
+# ==============================
+# These are the ONLY values that need changing. Everything else stays the same.
+
+# 1. Model path — point to the new scene file
+model_xml = "assets/g1/scene_g1_reach.xml"
+
+# 2. EE site name
+ee_site_name = "right_hand_ee"
+
+# 3. Dimensions — N_JOINTS is now 14 (was 13)
+action_dim      = 14     # 14 controlled joints
+obs_dim         = 45     # 3 + 14 + 14 + 14 = 45 per step
+stacked_obs_dim = 225    # 45 * 5 history steps
+
+# 4. Target workspace — biased toward right arm's reachable zone
+target_center = (0.45, -0.15, 1.05)   # (x, y, z) in metres
+target_radius = 0.25                   # metres
+
+# 5. Pelvis fall threshold — G1 nominal pelvis z = 0.793 m
+fall_height_threshold = 0.5   # pelvis below 0.5 m = fallen
+
+# ── actor_critic.py ────────────────────────────────────────────────────────
+# The input layer of the actor and critic networks must match stacked_obs_dim.
+# Change the first Linear layer:
+#   OLD: nn.Linear(210, 256)
+#   NEW: nn.Linear(225, 256)
+# Output layer of actor must match action_dim:
+#   OLD: nn.Linear(64, 13)
+#   NEW: nn.Linear(64, 14)
+# Everything in between stays the same.

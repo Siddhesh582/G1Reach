@@ -1,5 +1,5 @@
 """
-policy/actor_critic.py — Actor-Critic network aligned with unitree_rl_lab
+policy/actor_critic.py — Actor-Critic network aligned with unitree_rl_lab rsl_rl_ppo_cfg.py
 
 From rsl_rl_ppo_cfg.py:
     actor_hidden_dims  = [512, 256, 128]
@@ -7,11 +7,12 @@ From rsl_rl_ppo_cfg.py:
     activation         = "elu"
     init_noise_std     = 1.0  → log_std_init = 0.0
 
-Key difference from v1: actor and critic have SEPARATE backbones
-(not shared). This matches rsl_rl's ActorCritic implementation and
-gives the critic access to privileged information if needed later.
+Key difference from v1: actor and critic have SEPARATE backbones (not shared).
+This matches rsl_rl's ActorCritic implementation and gives the critic access to
+privileged information if needed later.
 
-Input: stacked_obs_dim = 210  (42-dim × history_length=5)
+Input:  stacked_obs_dim = 225  (45-dim × history_length=5)
+Output: action_dim      = 14   (14 upper-body joints)
 """
 
 import numpy as np
@@ -41,7 +42,6 @@ def make_mlp(
             nn.init.zeros_(lin.bias)
         layers += [lin, act_fn()]
         in_dim = h
-    # Output layer
     out = nn.Linear(in_dim, output_dim)
     if ortho_init:
         nn.init.orthogonal_(out.weight, gain=output_scale)
@@ -54,40 +54,40 @@ class ActorCritic(nn.Module):
     """
     Separate actor and critic MLPs, aligned with rsl_rl ActorCritic.
 
-    Actor:  obs → [512,256,128] → ELU → mean(action_dim)
-    Critic: obs → [512,256,128] → ELU → value(1)
-    log_std: learned parameter, initialised to 0.0 (std=1.0, per init_noise_std=1.0)
+    Actor:  obs → [512, 256, 128] → ELU → mean (action_dim=14)
+    Critic: obs → [512, 256, 128] → ELU → value (1)
+    log_std: learned parameter, initialised to 0.0 (std=1.0)
     """
 
     def __init__(self, cfg: G1Config = None):
         super().__init__()
         self.cfg = cfg or G1Config()
 
-        in_dim     = self.cfg.stacked_obs_dim   # 210
-        act_dim    = self.cfg.action_dim         # 13
-        act_hidden = self.cfg.actor_hidden_dims  # (512, 256, 128)
-        crt_hidden = self.cfg.critic_hidden_dims # (512, 256, 128)
-        activation = self.cfg.activation         # "elu"
+        in_dim     = self.cfg.stacked_obs_dim    # 225  (was 210)
+        act_dim    = self.cfg.action_dim          # 14   (was 13)
+        act_hidden = self.cfg.actor_hidden_dims   # (512, 256, 128)
+        crt_hidden = self.cfg.critic_hidden_dims  # (512, 256, 128)
+        activation = self.cfg.activation          # "elu"
         ortho      = self.cfg.ortho_init
 
-        # ── Actor ────────────────────────────────────────────────────────────
+        # ── Actor ─────────────────────────────────────────────────────────────
         self.actor = make_mlp(
             in_dim, act_hidden, act_dim,
             activation=activation, ortho_init=ortho, output_scale=0.01
         )
 
-        # Learnable log_std — init_noise_std=1.0 → log_std=0.0
+        # Learnable log_std — init_noise_std=1.0 → log_std_init=0.0
         self.log_std = nn.Parameter(
             torch.full((act_dim,), self.cfg.log_std_init)
         )
 
-        # ── Critic ───────────────────────────────────────────────────────────
+        # ── Critic ────────────────────────────────────────────────────────────
         self.critic = make_mlp(
             in_dim, crt_hidden, 1,
             activation=activation, ortho_init=ortho, output_scale=1.0
         )
 
-    # ─────────────────────────────────────────────────────────────────────────
+    # ──────────────────────────────────────────────────────────────────────────
 
     def get_action_and_value(
         self,

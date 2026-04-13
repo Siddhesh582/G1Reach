@@ -1,0 +1,51 @@
+<mujoco model="g1_reach_scene">
+  <!--
+    scene_g1_reach.xml  —  VisionGuidedPolicy reaching task scene
+    ==============================================================
+    Includes g1_29dof.xml (which now contains the right_hand_ee site).
+    Adds: floor, lighting, target mocap sphere.
+    Nothing else. g1_29dof.xml is not modified beyond the one site addition.
+  -->
+
+  <include file="g1_29dof.xml"/>
+
+  <statistic center="0 0 0.5" extent="2.0"/>
+
+  <visual>
+    <headlight diffuse="0.6 0.6 0.6" ambient="0.3 0.3 0.3" specular="0 0 0"/>
+    <rgba haze="0.15 0.25 0.35 1"/>
+    <global azimuth="-130" elevation="-20"/>
+  </visual>
+
+  <asset>
+    <texture type="skybox" builtin="gradient" rgb1="0.3 0.5 0.7" rgb2="0 0 0"
+      width="512" height="3072"/>
+    <texture type="2d" name="groundplane" builtin="checker" mark="edge"
+      rgb1="0.2 0.3 0.4" rgb2="0.1 0.2 0.3" markrgb="0.8 0.8 0.8"
+      width="300" height="300"/>
+    <material name="groundplane" texture="groundplane" texuniform="true"
+      texrepeat="5 5" reflectance="0.2"/>
+    <material name="target_mat" rgba="0.0 0.9 0.1 0.7"/>
+  </asset>
+
+  <worldbody>
+    <!-- Overhead key light -->
+    <light pos="0 0 2.5" dir="0 0 -1" directional="true"
+      diffuse="0.8 0.8 0.8" specular="0.2 0.2 0.2" castshadow="true"/>
+    <!-- Front-left fill light to reduce shadows on the arm -->
+    <light pos="2 1 2" dir="-1 -0.5 -1" directional="true"
+      diffuse="0.4 0.4 0.4" specular="0.0 0.0 0.0" castshadow="false"/>
+
+    <geom name="floor" size="0 0 0.05" type="plane" material="groundplane"/>
+
+    <!--
+      Target marker: mocap = kinematic body, no mass, no collision.
+      G1ReachEnv sets data.mocap_pos[0] each reset to move the green sphere.
+    -->
+    <body name="target_body" mocap="true" pos="0.5 -0.15 1.05">
+      <geom name="target_geom" type="sphere" size="0.04"
+        material="target_mat" contype="0" conaffinity="0"/>
+    </body>
+  </worldbody>
+
+</mujoco>
