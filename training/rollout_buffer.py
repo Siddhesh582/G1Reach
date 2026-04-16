@@ -26,7 +26,7 @@ class RolloutBuffer:
         self.device  = device
         self.T       = cfg.rollout_steps   # steps per env
         self.N       = cfg.num_envs        # parallel envs
-        self.obs_dim = cfg.obs_dim
+        self.obs_dim = cfg.stacked_obs_dim
         self.act_dim = cfg.action_dim
 
         self._init_buffers()

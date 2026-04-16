@@ -58,11 +58,11 @@ class G1Config:
     ee_site_name:     str   = "right_hand_ee"
 
     # Target workspace: sphere of this radius centred at target_center
-    target_radius:    float = 0.25
+    target_radius:    float = 0.15
     target_center:    Tuple[float, float, float] = (0.45, -0.15, 1.05)
 
     # Success threshold (m)
-    success_dist:     float = 0.05
+    success_dist:     float = 0.12
 
     # Episode length
     max_episode_steps: int  = 500   # at 50Hz = 10s
@@ -74,7 +74,7 @@ class G1Config:
 
     # Action scale — from unitree_rl_lab ActionsCfg: scale=0.25
     # q_des = q_default + action * action_scale
-    action_scale:       float = 0.25
+    action_scale:       float = 0.4
 
     # Fall detection: pelvis z below this height (m) = fallen
     # G1 nominal pelvis height = 0.793 m; 0.5 m gives ~30 cm of drop tolerance
@@ -91,16 +91,16 @@ class G1Config:
     obs_noise_rel_target: float = 0.005  # small noise on relative target
 
     # ─── Reward weights (adapted from velocity_env_cfg.py RewardsCfg) ────────
-    rew_weight_dist:          float = -1.0    # dense: -||ee - target||
-    rew_weight_success:       float = 5.0     # bonus on reaching goal
-    rew_weight_alive:         float = 0.15    # from mdp.is_alive weight=0.15
-    rew_weight_action_rate:   float = -0.05   # action_rate_l2 weight=-0.05
-    rew_weight_joint_vel:     float = -0.001  # joint_vel_l2 weight=-0.001
-    rew_weight_joint_acc:     float = -2.5e-7 # joint_acc_l2 weight=-2.5e-7
-    rew_weight_energy:        float = -2e-5   # energy weight=-2e-5
-    rew_weight_dof_limits:    float = -5.0    # dof_pos_limits weight=-5.0
-    rew_weight_joint_dev:     float = -0.1    # joint_deviation_arms weight=-0.1
-    rew_weight_fall:          float = -5.0    # large penalty on fall
+    rew_weight_dist:          float = -2.0    # dense: -||ee - target||
+    rew_weight_success:       float = 10.0     # bonus on reaching goal
+    rew_weight_alive:         float = 0.0    # from mdp.is_alive weight=0.15
+    rew_weight_action_rate:   float = -0.001   # action_rate_l2 weight=-0.05
+    rew_weight_joint_vel:     float = -0.0001  # joint_vel_l2 weight=-0.001
+    rew_weight_joint_acc:     float = 0.0 # joint_acc_l2 weight=-2.5e-7
+    rew_weight_energy:        float = 0.0   # energy weight=-2e-5
+    rew_weight_dof_limits:    float = -0.5    # dof_pos_limits weight=-5.0
+    rew_weight_joint_dev:     float = 0.0    # joint_deviation_arms weight=-0.1
+    rew_weight_fall:          float = -10.0    # large penalty on fall
 
     # ─── Domain Randomisation (from velocity_env_cfg.py EventCfg) ────────────
     dr_friction_range:        Tuple[float, float] = (0.3, 1.0)
@@ -110,35 +110,36 @@ class G1Config:
     dr_kp_range:              Tuple[float, float] = (0.8, 1.2)
 
     # ─── PPO Hyperparameters (from rsl_rl_ppo_cfg.py) ────────────────────────
-    num_envs:         int   = 8
-    rollout_steps:    int   = 2048
+    num_envs:         int   = 32
+    rollout_steps:    int   = 1024
     batch_size:       int   = 512
     n_epochs:         int   = 5           # num_learning_epochs=5
     gamma:            float = 0.99
     gae_lambda:       float = 0.95
     clip_eps:         float = 0.2
     clip_value_loss:  bool  = True
-    entropy_coef:     float = 0.01
-    value_coef:       float = 1.0
+    entropy_coef:     float = 0.001
+    value_coef:       float = 0.5
     max_grad_norm:    float = 1.0
-    learning_rate:    float = 1e-3
+    learning_rate:    float = 3e-4
 
     # Adaptive KL-based LR schedule (from rsl_rl_ppo_cfg: schedule="adaptive")
-    lr_schedule:      str   = "adaptive"
+    lr_schedule:      str   = "linear"
     desired_kl:       float = 0.01
     lr_min:           float = 1e-5
 
-    total_timesteps:  int   = 5_000_000
+    total_timesteps:  int   = 7_000_000
 
     # ─── Network Architecture (from rsl_rl_ppo_cfg.py) ───────────────────────
     actor_hidden_dims:  Tuple[int, ...] = (512, 256, 128)
     critic_hidden_dims: Tuple[int, ...] = (512, 256, 128)
     activation:         str             = "elu"
     log_std_init:       float           = 0.0
+    log_std_final:      float           = -2.0   # std anneals from exp(0.0)=1.0 to exp(-2.0)=0.135
     ortho_init:         bool            = True
 
     # ─── Hardware ────────────────────────────────────────────────────────────
-    device:           str   = "cuda:1"   # GPU 1 on Hulk PC
+    device:           str   = "cuda:0"   # GPU 1 on Hulk PC
     seed:             int   = 42
 
     # ─── Logging ─────────────────────────────────────────────────────────────
@@ -146,4 +147,4 @@ class G1Config:
     save_interval:    int   = 100
     eval_interval:    int   = 25
     eval_episodes:    int   = 10
-    run_name:         str   = "ppo_g1_reach_v2"
+    run_name:         str   = "ppo_g1_reach_v5"

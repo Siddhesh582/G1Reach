@@ -16,6 +16,7 @@ import torch
 import torch.nn as nn
 from torch.optim import Adam
 import gymnasium as gym
+import math as _math
 
 from config import G1Config
 from policy.actor_critic import ActorCritic
@@ -75,21 +76,27 @@ class PPOTrainer:
             ep_rewards, ep_lengths, ep_successes = [], [], []
             buf_rewards = np.zeros(cfg.num_envs, dtype=np.float32)
             buf_lengths = np.zeros(cfg.num_envs, dtype=np.int32)
+            # Debug: track distances seen during rollout to check arm is moving
+            rollout_dists = []
 
             self.buffer.reset()
             self.policy.eval()
 
             for _ in range(cfg.rollout_steps):
                 with torch.no_grad():
-                    action, log_prob, _, value = self.policy.get_action_and_value(obs)
+                    action_raw, log_prob, _, value = self.policy.get_action_and_value(obs)
+                    action_env = action_raw.clamp(-1.0, 1.0)
 
-                cpu_act = action.cpu().numpy()
-                next_obs, reward, terminated, truncated, info = self.envs.step(cpu_act)
+                cpu_act_raw = action_raw.cpu().numpy()   # store this in buffer
+                cpu_act_env = action_env.cpu().numpy()   # send this to env
+
+                next_obs, reward, terminated, truncated, info = self.envs.step(cpu_act_env)
+
                 done = np.logical_or(terminated, truncated)
 
                 self.buffer.add(
                     obs=obs.cpu().numpy(),
-                    action=cpu_act,
+                    action=cpu_act_raw,
                     reward=reward.astype(np.float32),
                     value=value.cpu().numpy(),
                     log_prob=log_prob.cpu().numpy(),
@@ -112,6 +119,11 @@ class PPOTrainer:
                 obs   = torch.tensor(next_obs, dtype=torch.float32, device=self.device)
                 dones = torch.tensor(done,     dtype=torch.float32, device=self.device)
                 self.global_step += cfg.num_envs
+
+                # Collect dist for debugging (sample env 0 only)
+                if "dist" in info:
+                    d = info["dist"]
+                    rollout_dists.append(float(d[0]) if hasattr(d, '__len__') else float(d))
 
             # ── GAE ──────────────────────────────────────────────────────────
             with torch.no_grad():
@@ -137,18 +149,28 @@ class PPOTrainer:
                 for pg in self.optimizer.param_groups:
                     pg["lr"] = self.current_lr
 
+            # ── log_std annealing ─────────────────────────────────────────────
+            # Decay exploration noise linearly: std=1.0 (start) → std=0.135 (end)
+            # Decouples exploration from entropy loss — prevents log_std freezing.
+            progress = self.global_step / cfg.total_timesteps
+            log_std_now = cfg.log_std_init + progress * (cfg.log_std_final - cfg.log_std_init)
+            self.policy.log_std_value = float(log_std_now)
+
+
             # ── Logging ──────────────────────────────────────────────────────
             if self.rollout_num % cfg.log_interval == 0:
                 elapsed = time.time() - self.start_time
                 fps     = self.global_step / elapsed
                 stats = {
-                    "train/mean_reward":    np.mean(ep_rewards)   if ep_rewards   else 0.0,
-                    "train/mean_ep_length": np.mean(ep_lengths)   if ep_lengths   else 0.0,
-                    "train/success_rate":   np.mean(ep_successes) if ep_successes else 0.0,
+                    "train/mean_reward":    np.mean(ep_rewards)    if ep_rewards    else 0.0,
+                    "train/mean_ep_length": np.mean(ep_lengths)    if ep_lengths    else 0.0,
+                    "train/success_rate":   np.mean(ep_successes)  if ep_successes  else 0.0,
+                    "train/dist_mean":      np.mean(rollout_dists) if rollout_dists else 0.0,  # ADD THIS
                     "train/fps":            fps,
                     "train/learning_rate":  self.current_lr,
                     **update_stats,
                 }
+
                 self.logger.log(stats, step=self.global_step)
                 print(
                     f"[{self.global_step:>8,}] "
@@ -158,6 +180,28 @@ class PPOTrainer:
                     f"lr={self.current_lr:.2e}  "
                     f"fps={fps:.0f}"
                 )
+                # ── Debug diagnostics ─────────────────────────────────────────
+                import math as _math
+                _log_std = self.policy.log_std_value
+                _std     = _math.exp(_log_std)
+                print(
+                    f"  [std]     current={_std:.4f}  "
+                    f"log_std={_log_std:.4f}  "
+                    f"progress={self.global_step/cfg.total_timesteps:.3f}"
+                )
+                print(
+                    f"  [loss]    pol={update_stats['update/policy_loss']:+.4f}  "
+                    f"val={update_stats['update/value_loss']:.4f}  "
+                    f"ent={update_stats['update/entropy']:.4f}  "
+                    f"clip={update_stats['update/clip_frac']:.3f}"
+                )
+                if rollout_dists:
+                    print(
+                        f"  [dist]    mean={np.mean(rollout_dists):.4f}m  "
+                        f"min={np.min(rollout_dists):.4f}m  "
+                        f"max={np.max(rollout_dists):.4f}m  "
+                        f"(env0, {len(rollout_dists)} steps)"
+                    )
 
             # ── Evaluation ───────────────────────────────────────────────────
             if self.rollout_num % cfg.eval_interval == 0:
@@ -194,6 +238,7 @@ class PPOTrainer:
                 actions    = batch["actions"]
                 old_lp     = batch["log_probs"]
                 advantages = batch["advantages"]
+                advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-8)
                 returns    = batch["returns"]
                 old_values = batch["values"]
 
@@ -213,7 +258,7 @@ class PPOTrainer:
                     (new_values - returns).pow(2),
                     (v_clipped  - returns).pow(2)
                 ).mean()
-                value_loss  = 0.5 * v_loss
+                value_loss  = 0.5 * v_loss 
 
                 # Entropy
                 entropy_loss = -entropy.mean()
@@ -227,12 +272,30 @@ class PPOTrainer:
 
                 self.optimizer.zero_grad()
                 loss.backward()
-                nn.utils.clip_grad_norm_(self.policy.parameters(), cfg.max_grad_norm)
+                grad_norm = nn.utils.clip_grad_norm_(self.policy.parameters(), cfg.max_grad_norm)
+                if grad_norm > 1.0:
+                    print(f"  [GRAD] norm={grad_norm:.2f} — clipped")
                 self.optimizer.step()
 
+
                 with torch.no_grad():
+                    has_nan = any(p.isnan().any() for p in self.policy.parameters())
+                    if has_nan:
+                        print("  [NaN] detected in policy weights — stopping update")
+                        break
+
                     approx_kl = ((ratio - 1) - log_ratio).mean().item()
                     clip_frac  = ((ratio - 1).abs() > cfg.clip_eps).float().mean().item()
+
+                    # Detect KL spike — print per-joint std at the moment of explosion
+                    if approx_kl > 0.1:
+                        _lsv = self.policy.log_std_value
+                        print(
+                            f"  [KL-SPIKE] kl={approx_kl:.4f}  "
+                            f"ratio min={ratio.min().item():.4f}  "
+                            f"max={ratio.max().item():.4f}  "
+                            f"log_std={_lsv:.4f}  std={_math.exp(_lsv):.4f}"
+                        )
 
                 pol_losses.append(policy_loss.item())
                 val_losses.append(value_loss.item())
