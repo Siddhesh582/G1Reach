@@ -1,20 +1,19 @@
-# VisionGuidedPolicy — requirements.txt
+# requirements.txt
 # Install with: pip install -r requirements.txt
-#
-# NOTE: Isaac Lab and IsaacSim must be installed separately.
-# Follow: https://isaac-sim.github.io/IsaacLab/main/source/setup/installation/
-# Do NOT pip install isaaclab — it is sourced from your local install.
 
-# --- Core training ---
-torch>=2.0.0                   # PPO implementation
+# Core training
+torch>=2.0.0
 numpy>=1.24.0
-scipy>=1.10.0                  # rotation math in transforms.py
+scipy>=1.10.0
 
-# --- Logging ---
+# Simulation
+mujoco>=3.0.0
+gymnasium>=0.29.0
+
+# Logging
 tensorboard>=2.13.0
-pandas>=2.0.0                  # CSV logging in logger.py
+pandas>=2.0.0
 
-# --- Hardware deployment only (not needed for sim training) ---
-# Uncomment when running deploy/deploy.py on real hardware:
+# Hardware deployment only - uncomment when running deploy/deploy.py on real hardware
 # pyrealsense2>=2.54.0
 # opencv-contrib-python>=4.8.0

@@ -1,5 +1,5 @@
 """
-main.py — Entry point for VisionGuidedPolicy PPO training (MuJoCo)
+main.py - Entry point for VisionGuidedPolicy PPO training (MuJoCo)
 
 Usage:
   # Smoke test
@@ -17,7 +17,7 @@ Usage:
   # Watch trained policy in MuJoCo viewer at quarter speed
   CUDA_VISIBLE_DEVICES=1 python main.py --watch --checkpoint checkpoints/ppo_g1_reach_v5_final.pt --speed 0.25
 
-  # Record video — runs forever until Ctrl+C (clean 1080p, no overlays)
+  # Record video - runs forever until Ctrl+C (clean 1080p, no overlays)
   CUDA_VISIBLE_DEVICES=1 python main.py --record --checkpoint checkpoints/ppo_g1_reach_v5_final.pt --record-speed 0.1
 
   # Record a specific number of episodes
@@ -46,7 +46,7 @@ from policy.actor_critic import ActorCritic
 
 
 def parse_args():
-    p = argparse.ArgumentParser(description="VisionGuidedPolicy — G1 PPO (MuJoCo)")
+    p = argparse.ArgumentParser(description="VisionGuidedPolicy - G1 PPO (MuJoCo)")
     mode = p.add_mutually_exclusive_group(required=True)
     mode.add_argument("--train",  action="store_true", help="Run full training")
     mode.add_argument("--test",   action="store_true", help="Smoke test on CPU (~30s)")
@@ -75,22 +75,20 @@ def parse_args():
     return p.parse_args()
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Codec selection — headless-safe
-# ─────────────────────────────────────────────────────────────────────────────
+# Codec selection - headless-safe
 
 def _pick_codec(video_dir: str, width: int, height: int, fps: int):
     """
     Return (fourcc, ext) for the best available codec on this machine.
 
     Priority:
-      1. avc1 / H.264  — best quality/size, hardware-encoded on desktop Linux
-      2. mp4v / MPEG-4 — universal software fallback, always available
-      3. XVID           — last resort
+      1. avc1 / H.264  - best quality/size, hardware-encoded on desktop Linux
+      2. mp4v / MPEG-4 - universal software fallback, always available
+      3. XVID           - last resort
 
-    On headless servers the V4L2 H.264 encoder is absent, so avc1 will fail
+    On headless servers the V4L2 H.264 encoder is absent so avc1 will fail
     the test write. We detect that here and skip it cleanly without spewing
-    FFmpeg error logs (we suppress stderr during the probe).
+    FFmpeg error logs (stderr is suppressed during the probe).
     """
     import cv2
 
@@ -140,9 +138,7 @@ def _pick_codec(video_dir: str, width: int, height: int, fps: int):
     return chosen_fourcc, chosen_ext
 
 
-# ─────────────────────────────────────────────────────────────────────────────
 # Smoke test
-# ─────────────────────────────────────────────────────────────────────────────
 
 def run_smoke_test(cfg: G1Config):
     print("\n[SmokeTest] Starting...")
@@ -155,12 +151,12 @@ def run_smoke_test(cfg: G1Config):
     assert obs.shape == (cfg.stacked_obs_dim,), \
         f"Obs shape mismatch: got {obs.shape}, expected ({cfg.stacked_obs_dim},)"
     assert env.action_space.shape == (cfg.action_dim,)
-    print(f"  obs shape:    {obs.shape}  ✓")
-    print(f"  action shape: {env.action_space.shape}  ✓")
+    print(f"  obs shape:    {obs.shape}  ok")
+    print(f"  action shape: {env.action_space.shape}  ok")
 
     print("[SmokeTest] Instantiating ActorCritic...")
     policy = ActorCritic(cfg)
-    print(f"  parameters: {policy.n_parameters:,}  ✓")
+    print(f"  parameters: {policy.n_parameters:,}  ok")
 
     print("[SmokeTest] Running 200 random steps...")
     total_reward = 0.0
@@ -170,7 +166,7 @@ def run_smoke_test(cfg: G1Config):
         total_reward += reward
         if terminated or truncated:
             obs, _ = env.reset()
-    print(f"  total random reward (200 steps): {total_reward:.3f}  ✓")
+    print(f"  total random reward (200 steps): {total_reward:.3f}  ok")
 
     print("[SmokeTest] Policy forward pass...")
     obs_t = torch.tensor(obs, dtype=torch.float32).unsqueeze(0)
@@ -180,15 +176,13 @@ def run_smoke_test(cfg: G1Config):
     print(f"  log_prob: {log_prob.item():.4f}")
     print(f"  entropy:  {entropy.item():.4f}")
     print(f"  value:    {value.item():.4f}")
-    print(f"[SmokeTest] Obs history: {cfg.history_length} frames × {cfg.obs_dim} = {cfg.stacked_obs_dim}  ✓")
+    print(f"[SmokeTest] Obs history: {cfg.history_length} frames x {cfg.obs_dim} = {cfg.stacked_obs_dim}  ok")
 
     env.close()
-    print("\n[SmokeTest] ✓ All checks passed — ready to train.\n")
+    print("\n[SmokeTest] All checks passed - ready to train.\n")
 
 
-# ─────────────────────────────────────────────────────────────────────────────
 # Evaluation (numbers only)
-# ─────────────────────────────────────────────────────────────────────────────
 
 def run_eval(cfg: G1Config, checkpoint_path: str):
     if checkpoint_path is None:
@@ -225,9 +219,7 @@ def run_eval(cfg: G1Config, checkpoint_path: str):
           f"success={np.mean(successes):.2%}  mean_dist={np.mean(dists):.4f}m")
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Watch — MuJoCo interactive viewer
-# ─────────────────────────────────────────────────────────────────────────────
+# Watch - MuJoCo interactive viewer
 
 def run_watch(cfg: G1Config, checkpoint_path: str, max_episodes: int = 0,
               speed: float = 1.0):
@@ -239,9 +231,9 @@ def run_watch(cfg: G1Config, checkpoint_path: str, max_episodes: int = 0,
         max_episodes: 0 = run forever until window closed.
 
     Controls:
-      Space     — pause / resume
-      Scroll    — zoom
-      Left drag — rotate camera
+      Space     - pause / resume
+      Scroll    - zoom
+      Left drag - rotate camera
     """
     if checkpoint_path is None:
         raise ValueError("--watch requires --checkpoint <path>")
@@ -262,7 +254,7 @@ def run_watch(cfg: G1Config, checkpoint_path: str, max_episodes: int = 0,
     if max_episodes > 0:
         print(f"[Watch] Will run {max_episodes} episodes then exit.")
     else:
-        print(f"[Watch] Running indefinitely — close the viewer window to stop.")
+        print(f"[Watch] Running indefinitely - close the viewer window to stop.")
 
     env = G1ReachEnv(cfg=cfg)
     obs, _ = env.reset(seed=0)
@@ -305,36 +297,34 @@ def run_watch(cfg: G1Config, checkpoint_path: str, max_episodes: int = 0,
             time.sleep(max(0.0, target_step_time - (time.time() - t0)))
 
     env.close()
-    print(f"\n[Watch] Done — {ep_count} episodes.")
+    print(f"\n[Watch] Done - {ep_count} episodes.")
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Record — save episode videos to disk using offscreen renderer
-# ─────────────────────────────────────────────────────────────────────────────
+# Record - save episode videos to disk using offscreen renderer
 
 def run_record(cfg: G1Config, checkpoint_path: str, max_episodes: int = 0,
                record_speed: float = 0.1, video_dir: str = "videos",
                width: int = 1920, height: int = 1080):
     """
     Record episode videos using MuJoCo's offscreen renderer.
-    No display required — runs fully headless.
+    No display required - runs fully headless.
 
     max_episodes=0 means run forever until Ctrl+C.
-    Each episode saved individually as ep001_success.mp4 or ep001_fail.mp4.
-    A combined all_episodes.mp4 is written when recording ends (Ctrl+C or done).
+    Each episode is saved individually as ep001_success.mp4 or ep001_fail.mp4.
+    A combined all_episodes.mp4 is written when recording ends.
 
     How speed works:
       output_fps = 50 * record_speed
-      record_speed=0.1 → output_fps=5 → 10x slow motion
-      record_speed=0.5 → output_fps=25 → 2x slow motion
-      record_speed=1.0 → output_fps=50 → realtime
+      record_speed=0.1 --> output_fps=5 --> 10x slow motion
+      record_speed=0.5 --> output_fps=25 --> 2x slow motion
+      record_speed=1.0 --> output_fps=50 --> realtime
 
-    Resolution: controlled by --width / --height (default 1920×1080).
+    Resolution is controlled by --width / --height (default 1920x1080).
     The MuJoCo model XML must declare an offscreen framebuffer at least as
     large via <visual><global offwidth="W" offheight="H"/></visual>.
 
     Codec is selected automatically: H.264 if available, mp4v otherwise.
-    No overlays — clean render only.
+    No overlays - clean render only.
     """
     if checkpoint_path is None:
         raise ValueError("--record requires --checkpoint <path>")
@@ -356,13 +346,13 @@ def run_record(cfg: G1Config, checkpoint_path: str, max_episodes: int = 0,
 
     output_fps = max(1, int(50.0 * record_speed))
 
-    # Codec probe — silent, headless-safe
+    # Codec probe - silent, headless-safe
     fourcc, ext = _pick_codec(video_dir, width, height, output_fps)
 
     print(f"[Record] Loaded:      {checkpoint_path}")
-    print(f"[Record] Episodes:    {'∞ (Ctrl+C to stop)' if max_episodes == 0 else max_episodes}")
-    print(f"[Record] Speed:       {record_speed}x → {1/record_speed:.0f}x slow motion")
-    print(f"[Record] Resolution:  {width}×{height}")
+    print(f"[Record] Episodes:    {'inf (Ctrl+C to stop)' if max_episodes == 0 else max_episodes}")
+    print(f"[Record] Speed:       {record_speed}x --> {1/record_speed:.0f}x slow motion")
+    print(f"[Record] Resolution:  {width}x{height}")
     print(f"[Record] Output FPS:  {output_fps}")
     print(f"[Record] Output dir:  {video_dir}/")
 
@@ -371,7 +361,7 @@ def run_record(cfg: G1Config, checkpoint_path: str, max_episodes: int = 0,
     # MuJoCo offscreen renderer.
     # Requires the scene XML to declare:
     #   <visual><global offwidth="W" offheight="H"/></visual>
-    # where W >= width and H >= height.  See scene_g1_reach.xml.
+    # where W >= width and H >= height. See scene_g1_reach.xml.
     renderer = mujoco.Renderer(env.model, height=height, width=width)
 
     all_frames   = []
@@ -389,7 +379,7 @@ def run_record(cfg: G1Config, checkpoint_path: str, max_episodes: int = 0,
             frames    = []
 
             while not done:
-                # Render current state — clean, no overlays
+                # Render current state - clean, no overlays
                 renderer.update_scene(env.data)
                 frame     = renderer.render()               # RGB (H, W, 3)
                 frame_bgr = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
@@ -419,14 +409,13 @@ def run_record(cfg: G1Config, checkpoint_path: str, max_episodes: int = 0,
             writer.release()
 
             print(f"  [Ep {ep_count:3d}] reward={ep_reward:+.2f}  success={success}  "
-                  f"dist={dist:.4f}m  frames={len(frames)}  → {ep_path}")
+                  f"dist={dist:.4f}m  frames={len(frames)}  saved to {ep_path}")
 
-            # Stop if episode limit reached
             if max_episodes > 0 and ep_count >= max_episodes:
                 break
 
     except KeyboardInterrupt:
-        print(f"\n[Record] Interrupted at episode {ep_count} — saving combined video...")
+        print(f"\n[Record] Interrupted at episode {ep_count} - saving combined video...")
 
     # Save combined video of everything recorded so far
     if all_frames:
@@ -435,13 +424,13 @@ def run_record(cfg: G1Config, checkpoint_path: str, max_episodes: int = 0,
         for f in all_frames:
             writer.write(f)
         writer.release()
-        print(f"  Combined video → {combined_path}")
+        print(f"  Combined video saved to {combined_path}")
 
     renderer.close()
     env.close()
 
     if ep_rewards:
-        print(f"\n[Record] ── Summary ───────────────────────────────────────")
+        print(f"\n[Record] Summary")
         print(f"  Episodes recorded:  {ep_count}")
         print(f"  Success rate:       {np.mean(ep_successes):.1%}")
         print(f"  Mean reward:        {np.mean(ep_rewards):+.3f}")
@@ -450,9 +439,7 @@ def run_record(cfg: G1Config, checkpoint_path: str, max_episodes: int = 0,
         print(f"[Record] Done.")
 
 
-# ─────────────────────────────────────────────────────────────────────────────
 # Main
-# ─────────────────────────────────────────────────────────────────────────────
 
 def main():
     args = parse_args()
@@ -488,7 +475,7 @@ def main():
 
     if args.train:
         if "cuda" in cfg.device and not torch.cuda.is_available():
-            print("[Warning] CUDA not available — falling back to CPU")
+            print("[Warning] CUDA not available - falling back to CPU")
             cfg.device = "cpu"
         else:
             if "cuda" in cfg.device:

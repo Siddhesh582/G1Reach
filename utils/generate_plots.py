@@ -1,21 +1,21 @@
 """
-utils/generate_plots.py — Final poster visualizations for VisionGuidedPolicy
-=============================================================================
+utils/generate_plots.py - Final poster visualizations for VisionGuidedPolicy
+
 Usage:
     python utils/generate_plots.py --logdir logs/ --outdir result_plots/
 
 Outputs (PNG + PDF each):
-    1.  learning_curve.png      — reward only, smoothed, peak annotated
-    2.  eval_success.png        — eval success rate vs random baseline
-    3.  eval_dist.png           — eval EE distance with success threshold band
-    4.  value_loss.png          — critic value loss over training
-    5.  policy_loss.png         — actor policy loss over training
-    6.  kl_entropy.png          — KL divergence + entropy side by side
-    7.  clip_fraction.png       — PPO clip fraction (update aggressiveness)
-    8.  architecture_panel.png  — obs / action / network summary
-    9.  key_metrics_bar.png     — headline numbers at a glance
-    10. headline_numbers.png    — large-text stats card for poster
-    11. reward_pie.png          — reward component breakdown
+    1.  learning_curve.png      - reward only, smoothed, peak annotated
+    2.  eval_success.png        - eval success rate vs random baseline
+    3.  eval_dist.png           - eval EE distance with success threshold band
+    4.  value_loss.png          - critic value loss over training
+    5.  policy_loss.png         - actor policy loss over training
+    6.  kl_entropy.png          - KL divergence + entropy side by side
+    7.  clip_fraction.png       - PPO clip fraction (update aggressiveness)
+    8.  architecture_panel.png  - obs / action / network summary
+    9.  key_metrics_bar.png     - headline numbers at a glance
+    10. headline_numbers.png    - large-text stats card for poster
+    11. reward_pie.png          - reward component breakdown
 """
 
 import os
@@ -32,7 +32,7 @@ try:
 except ImportError:
     raise ImportError("Run: pip install tensorboard")
 
-# ── Palette ───────────────────────────────────────────────────────────────────
+# Color palette
 BLUE   = "#2563EB"
 GREEN  = "#16A34A"
 RED    = "#DC2626"
@@ -64,7 +64,7 @@ plt.rcParams.update({
 })
 
 
-# ── Helpers ───────────────────────────────────────────────────────────────────
+# Helpers
 
 def millions(x, pos):
     return f"{x/1e6:.1f}M"
@@ -100,7 +100,7 @@ def annotate_peak(ax, ss, sv, color, label, higher_is_better=True, offset_frac=0
     )
 
 
-# ── Data loading ──────────────────────────────────────────────────────────────
+# Data loading
 
 def load_run(run_dir):
     data = defaultdict(list)
@@ -150,7 +150,7 @@ def pick_best_run(runs, tag):
 def _curve(ax, runs, tag, color, label, window=20, alpha=0.15,
            scale=1.0, higher_is_better=True, annotate=True,
            annotate_fmt=".1f", annotate_suffix=""):
-    """Generic helper: load tag, smooth, plot, optionally annotate peak."""
+    # Load tag, smooth, plot, and optionally annotate peak
     _, best = pick_best_run(runs, tag)
     if best is None:
         return False
@@ -170,7 +170,7 @@ def _curve(ax, runs, tag, color, label, window=20, alpha=0.15,
     return True
 
 
-# ── Plot 1: Learning curve ────────────────────────────────────────────────────
+# Plot 1: Learning curve
 
 def plot_learning_curve(runs, outdir):
     fig, ax = plt.subplots(figsize=(7, 4.5))
@@ -185,7 +185,7 @@ def plot_learning_curve(runs, outdir):
     save(fig, outdir, "learning_curve")
 
 
-# ── Plot 2: Eval success rate ─────────────────────────────────────────────────
+# Plot 2: Eval success rate
 
 def plot_eval_success(runs, outdir):
     _, best = pick_best_run(runs, "eval/success_rate")
@@ -229,7 +229,7 @@ def plot_eval_success(runs, outdir):
     save(fig, outdir, "eval_success")
 
 
-# ── Plot 3: Eval EE distance ──────────────────────────────────────────────────
+# Plot 3: Eval EE distance
 
 def plot_eval_dist(runs, outdir):
     _, best = pick_best_run(runs, "eval/mean_dist")
@@ -263,14 +263,14 @@ def plot_eval_dist(runs, outdir):
     ax.xaxis.set_major_formatter(mticker.FuncFormatter(millions))
     ax.set_xlabel("Training Steps")
     ax.set_ylabel("Distance to Target (m)")
-    ax.set_title("End-Effector Distance to Target\n(Eval — deterministic policy)")
+    ax.set_title("End-Effector Distance to Target\n(Eval - deterministic policy)")
     ax.set_ylim(max(0, np.min(v) - 0.015), min(np.max(v) * 1.1, 0.20))
     ax.legend(loc="upper right")
     fig.tight_layout()
     save(fig, outdir, "eval_dist")
 
 
-# ── Plot 4: Value loss ────────────────────────────────────────────────────────
+# Plot 4: Value loss
 
 def plot_value_loss(runs, outdir):
     fig, ax = plt.subplots(figsize=(7, 4))
@@ -285,7 +285,7 @@ def plot_value_loss(runs, outdir):
     save(fig, outdir, "value_loss")
 
 
-# ── Plot 5: Policy loss ───────────────────────────────────────────────────────
+# Plot 5: Policy loss
 
 def plot_policy_loss(runs, outdir):
     _, best = pick_best_run(runs, "update/policy_loss")
@@ -308,7 +308,7 @@ def plot_policy_loss(runs, outdir):
     save(fig, outdir, "policy_loss")
 
 
-# ── Plot 6: KL + Entropy ──────────────────────────────────────────────────────
+# Plot 6: KL + Entropy
 
 def plot_kl_entropy(runs, outdir):
     _, best_kl  = pick_best_run(runs, "update/approx_kl")
@@ -339,14 +339,14 @@ def plot_kl_entropy(runs, outdir):
         axes[1].xaxis.set_major_formatter(mticker.FuncFormatter(millions))
         axes[1].set_xlabel("Training Steps")
         axes[1].set_ylabel("Entropy")
-        axes[1].set_title("Policy Entropy Over Training\n(Measures exploration — annealed by design)")
+        axes[1].set_title("Policy Entropy Over Training\n(Measures exploration - annealed by design)")
         axes[1].legend()
 
     fig.tight_layout()
     save(fig, outdir, "kl_entropy")
 
 
-# ── Plot 7: Clip fraction ─────────────────────────────────────────────────────
+# Plot 7: Clip fraction
 
 def plot_clip_fraction(runs, outdir):
     _, best = pick_best_run(runs, "update/clip_frac")
@@ -362,8 +362,8 @@ def plot_clip_fraction(runs, outdir):
     ax.plot(ss, sv, color=CYAN, linewidth=2.5, label="Clip fraction")
     ax.axhline(mean_clip, color=ORANGE, linewidth=1.5, linestyle="--",
                label=f"Mean: {mean_clip:.3f}")
-    # Healthy range shading — typically 0.1-0.3 is normal for PPO
-    ax.axhspan(0.1, 0.3, alpha=0.07, color=GREEN, label="Healthy range (0.1–0.3)")
+    # 0.1-0.3 is the typical healthy range for PPO
+    ax.axhspan(0.1, 0.3, alpha=0.07, color=GREEN, label="Healthy range (0.1-0.3)")
     ax.xaxis.set_major_formatter(mticker.FuncFormatter(millions))
     ax.set_xlabel("Training Steps")
     ax.set_ylabel("Clip Fraction")
@@ -373,7 +373,7 @@ def plot_clip_fraction(runs, outdir):
     save(fig, outdir, "clip_fraction")
 
 
-# ── Plot 8: Architecture panel ────────────────────────────────────────────────
+# Plot 8: Architecture panel
 
 def plot_architecture(outdir):
     fig, axes = plt.subplots(1, 3, figsize=(11, 4))
@@ -385,7 +385,7 @@ def plot_architecture(outdir):
     bars = axes[0].barh(obs_labels, obs_sizes, color=obs_colors,
                         edgecolor="white", linewidth=1.5, height=0.55)
     axes[0].set_xlabel("Dimensions")
-    axes[0].set_title("Observation Space\n(45-dim × 5 frames = 225)")
+    axes[0].set_title("Observation Space\n(45-dim x 5 frames = 225)")
     axes[0].set_xlim(0, 20)
     for bar, val in zip(bars, obs_sizes):
         axes[0].text(val + 0.3, bar.get_y() + bar.get_height() / 2,
@@ -417,7 +417,7 @@ def plot_architecture(outdir):
     save(fig, outdir, "architecture_panel")
 
 
-# ── Plot 9: Key metrics bar ───────────────────────────────────────────────────
+# Plot 9: Key metrics bar
 
 def plot_key_metrics_bar(runs, outdir):
     _, best_eval = pick_best_run(runs, "eval/success_rate")
@@ -452,10 +452,10 @@ def plot_key_metrics_bar(runs, outdir):
 
     if best_fps:
         s, v = get_sv(best_fps, "train/fps")
-        metrics["Training speed\n(FPS ÷ 100)"] = (np.mean(v)/100, "×100", PURPLE, 50)
+        metrics["Training speed\n(FPS / 100)"] = (np.mean(v)/100, "x100", PURPLE, 50)
 
     if not metrics:
-        print("  [skip] key_metrics_bar — no data"); return
+        print("  [skip] key_metrics_bar - no data"); return
 
     labels  = list(metrics.keys())
     values  = [metrics[l][0] for l in labels]
@@ -482,12 +482,12 @@ def plot_key_metrics_bar(runs, outdir):
     save(fig, outdir, "key_metrics_bar")
 
 
-# ── Plot 10: Headline numbers card ────────────────────────────────────────────
+# Plot 10: Headline numbers card
 
 def plot_headline_numbers(runs, outdir):
     """
-    Large-text stats card — designed to be placed prominently on the poster.
-    Shows the 6 most impactful numbers in a clean grid layout.
+    Large-text stats card for the poster.
+    Shows the 6 most impactful numbers in a clean grid.
     """
     _, best_eval = pick_best_run(runs, "eval/success_rate")
     _, best_dist = pick_best_run(runs, "eval/mean_dist")
@@ -514,7 +514,7 @@ def plot_headline_numbers(runs, outdir):
         stats.append((f"{np.mean(v)/1000:.1f}K", "Training FPS\n(RTX 2080)", PURPLE))
 
     if not stats:
-        print("  [skip] headline_numbers — no data"); return
+        print("  [skip] headline_numbers - no data"); return
 
     n    = len(stats)
     cols = 3
@@ -554,13 +554,13 @@ def plot_headline_numbers(runs, outdir):
     for j in range(n, len(axes)):
         axes[j].axis("off")
 
-    fig.suptitle("VisionGuidedPolicy — Key Results", fontsize=14,
+    fig.suptitle("G1Reach - Key Results", fontsize=14,
                  fontweight="bold", y=1.02)
     fig.tight_layout(pad=1.5)
     save(fig, outdir, "headline_numbers")
 
 
-# ── Plot 11: Reward pie ───────────────────────────────────────────────────────
+# Plot 11: Reward pie
 
 def plot_reward_pie(outdir):
     components = {
@@ -595,12 +595,10 @@ def plot_reward_pie(outdir):
     save(fig, outdir, "reward_pie")
 
 
-# ── Metrics summary ───────────────────────────────────────────────────────────
+# Metrics summary
 
 def print_metrics(runs):
-    print("\n" + "=" * 68)
     print("  TRAINING METRICS SUMMARY")
-    print("=" * 68)
 
     def report(tag, label, scale=1.0, unit="", fmt=".4f", lower_is_better=False):
         _, best = pick_best_run(runs, tag)
@@ -629,9 +627,9 @@ def print_metrics(runs):
     if best:
         s, v = get_sv(best, "eval/success_rate")
         v_pct = v * 100
-        print(f"  {'Eval success — peak':45s}  {np.max(v_pct):.1f}%")
-        print(f"  {'Eval success — mean (all evals)':45s}  {np.mean(v_pct):.1f}%")
-        print(f"  {'Eval success — sustained (last 50%)':45s}  {np.mean(v_pct[len(v_pct)//2:]):.1f}%")
+        print(f"  {'Eval success - peak':45s}  {np.max(v_pct):.1f}%")
+        print(f"  {'Eval success - mean (all evals)':45s}  {np.mean(v_pct):.1f}%")
+        print(f"  {'Eval success - sustained (last 50%)':45s}  {np.mean(v_pct[len(v_pct)//2:]):.1f}%")
         print(f"  {'Random baseline':45s}  ~10.0%")
         print(f"  {'Improvement over random (peak)':45s}  +{np.max(v_pct) - 10:.1f} pp")
         print(f"  {'Improvement over random (sustained)':45s}  +{np.mean(v_pct[len(v_pct)//2:]) - 10:.1f} pp")
@@ -641,8 +639,8 @@ def print_metrics(runs):
     _, best = pick_best_run(runs, "eval/mean_dist")
     if best:
         s, v = get_sv(best, "eval/mean_dist")
-        print(f"  {'EE dist — best':45s}  {np.min(v):.4f}m  ({np.min(v)*100:.1f}cm)")
-        print(f"  {'EE dist — mean (all evals)':45s}  {np.mean(v):.4f}m  ({np.mean(v)*100:.1f}cm)")
+        print(f"  {'EE dist - best':45s}  {np.min(v):.4f}m  ({np.min(v)*100:.1f}cm)")
+        print(f"  {'EE dist - mean (all evals)':45s}  {np.mean(v):.4f}m  ({np.mean(v)*100:.1f}cm)")
         print(f"  {'Success threshold':45s}  0.1200m  (12.0cm)")
         print(f"  {'Best dist % below threshold':45s}  {(0.12-np.min(v))/0.12*100:.1f}%")
         pct_eps = np.mean(v < 0.12) * 100
@@ -653,14 +651,13 @@ def print_metrics(runs):
     _, best = pick_best_run(runs, "train/fps")
     if best:
         s, v = get_sv(best, "train/fps")
-        print(f"  {'Training FPS — mean':45s}  {np.mean(v):.0f}")
-        print(f"  {'Training FPS — peak':45s}  {np.max(v):.0f}")
+        print(f"  {'Training FPS - mean':45s}  {np.mean(v):.0f}")
+        print(f"  {'Training FPS - peak':45s}  {np.max(v):.0f}")
 
     print(f"\n  Total runs in logs/:  {len(runs)}")
-    print("=" * 68 + "\n")
 
 
-# ── Main ──────────────────────────────────────────────────────────────────────
+# Main
 
 def main():
     parser = argparse.ArgumentParser()

@@ -1,14 +1,3 @@
-"""
-training/ppo_trainer.py — PPO trainer aligned with unitree_rl_lab rsl_rl_ppo_cfg.py
-
-Key changes from v1:
-  - Adaptive KL-based learning rate schedule (schedule="adaptive", desired_kl=0.01)
-    Matches rsl_rl OnPolicyRunner behaviour exactly
-  - value_coef=1.0, entropy_coef=0.01, max_grad_norm=1.0 (from rsl_rl_ppo_cfg)
-  - n_epochs=5, batch_size derived from num_mini_batches=4
-  - Separate actor/critic networks (no shared backbone)
-"""
-
 import os
 import time
 import numpy as np
@@ -37,9 +26,9 @@ class PPOTrainer:
         if "cuda" in str(self.device):
             torch.cuda.manual_seed_all(cfg.seed)
 
-        self.envs     = self._make_envs()
-        self.eval_env = G1ReachEnv(cfg=cfg)
-        self.policy   = ActorCritic(cfg).to(self.device)
+        self.envs      = self._make_envs()
+        self.eval_env  = G1ReachEnv(cfg=cfg)
+        self.policy    = ActorCritic(cfg).to(self.device)
         self.optimizer = Adam(self.policy.parameters(), lr=cfg.learning_rate, eps=1e-5)
         print(f"[PPOTrainer] Parameters: {self.policy.n_parameters:,}")
 
@@ -53,10 +42,6 @@ class PPOTrainer:
         self.rollout_num = 0
         self.current_lr  = cfg.learning_rate
         self.start_time  = time.time()
-
-    # ─────────────────────────────────────────────────────────────────────────
-    # Train
-    # ─────────────────────────────────────────────────────────────────────────
 
     def train(self):
         cfg = self.cfg
@@ -72,11 +57,11 @@ class PPOTrainer:
 
         while self.global_step < cfg.total_timesteps:
 
-            # ── Collect rollout ──────────────────────────────────────────────
+            # Collect rollout
             ep_rewards, ep_lengths, ep_successes = [], [], []
             buf_rewards = np.zeros(cfg.num_envs, dtype=np.float32)
             buf_lengths = np.zeros(cfg.num_envs, dtype=np.int32)
-            # Debug: track distances seen during rollout to check arm is moving
+            # Track distances from env 0 to check the arm is actually moving
             rollout_dists = []
 
             self.buffer.reset()
@@ -87,8 +72,8 @@ class PPOTrainer:
                     action_raw, log_prob, _, value = self.policy.get_action_and_value(obs)
                     action_env = action_raw.clamp(-1.0, 1.0)
 
-                cpu_act_raw = action_raw.cpu().numpy()   # store this in buffer
-                cpu_act_env = action_env.cpu().numpy()   # send this to env
+                cpu_act_raw = action_raw.cpu().numpy()  # stored in buffer (pre-clamp)
+                cpu_act_env = action_env.cpu().numpy()  # sent to env (post-clamp)
 
                 next_obs, reward, terminated, truncated, info = self.envs.step(cpu_act_env)
 
@@ -120,22 +105,22 @@ class PPOTrainer:
                 dones = torch.tensor(done,     dtype=torch.float32, device=self.device)
                 self.global_step += cfg.num_envs
 
-                # Collect dist for debugging (sample env 0 only)
                 if "dist" in info:
                     d = info["dist"]
                     rollout_dists.append(float(d[0]) if hasattr(d, '__len__') else float(d))
 
-            # ── GAE ──────────────────────────────────────────────────────────
+            # GAE
             with torch.no_grad():
                 last_values = self.policy.get_value(obs).cpu().numpy()
             self.buffer.compute_returns(last_values, dones.cpu().numpy())
 
-            # ── PPO update ───────────────────────────────────────────────────
+            # PPO update
             update_stats = self._ppo_update()
             self.rollout_num += 1
 
-            # ── Adaptive LR (from rsl_rl schedule="adaptive") ────────────────
+            # LR schedule
             if cfg.lr_schedule == "adaptive":
+                # Adaptive schedule from rsl_rl: adjust based on KL
                 kl = update_stats["update/approx_kl"]
                 if kl > cfg.desired_kl * 2.0:
                     self.current_lr = max(self.current_lr / 1.5, cfg.lr_min)
@@ -149,15 +134,13 @@ class PPOTrainer:
                 for pg in self.optimizer.param_groups:
                     pg["lr"] = self.current_lr
 
-            # ── log_std annealing ─────────────────────────────────────────────
-            # Decay exploration noise linearly: std=1.0 (start) → std=0.135 (end)
-            # Decouples exploration from entropy loss — prevents log_std freezing.
-            progress = self.global_step / cfg.total_timesteps
+            # Decay log_std linearly: std 1.0 at start -> 0.135 at end
+            # Decouples exploration from entropy loss to prevent log_std freezing
+            progress    = self.global_step / cfg.total_timesteps
             log_std_now = cfg.log_std_init + progress * (cfg.log_std_final - cfg.log_std_init)
             self.policy.log_std_value = float(log_std_now)
 
-
-            # ── Logging ──────────────────────────────────────────────────────
+            # Logging
             if self.rollout_num % cfg.log_interval == 0:
                 elapsed = time.time() - self.start_time
                 fps     = self.global_step / elapsed
@@ -165,7 +148,7 @@ class PPOTrainer:
                     "train/mean_reward":    np.mean(ep_rewards)    if ep_rewards    else 0.0,
                     "train/mean_ep_length": np.mean(ep_lengths)    if ep_lengths    else 0.0,
                     "train/success_rate":   np.mean(ep_successes)  if ep_successes  else 0.0,
-                    "train/dist_mean":      np.mean(rollout_dists) if rollout_dists else 0.0,  # ADD THIS
+                    "train/dist_mean":      np.mean(rollout_dists) if rollout_dists else 0.0,
                     "train/fps":            fps,
                     "train/learning_rate":  self.current_lr,
                     **update_stats,
@@ -180,8 +163,7 @@ class PPOTrainer:
                     f"lr={self.current_lr:.2e}  "
                     f"fps={fps:.0f}"
                 )
-                # ── Debug diagnostics ─────────────────────────────────────────
-                import math as _math
+                # Debug diagnostics
                 _log_std = self.policy.log_std_value
                 _std     = _math.exp(_log_std)
                 print(
@@ -203,7 +185,7 @@ class PPOTrainer:
                         f"(env0, {len(rollout_dists)} steps)"
                     )
 
-            # ── Evaluation ───────────────────────────────────────────────────
+            # Evaluation
             if self.rollout_num % cfg.eval_interval == 0:
                 ev = self._evaluate()
                 self.logger.log({
@@ -214,17 +196,13 @@ class PPOTrainer:
                 print(f"  [EVAL] rew={ev['mean_reward']:+.3f}  "
                       f"succ={ev['success_rate']:.2%}  dist={ev['mean_dist']:.4f}m")
 
-            # ── Checkpoint ───────────────────────────────────────────────────
+            # Checkpoint
             if self.rollout_num % cfg.save_interval == 0:
                 self._save_checkpoint()
 
         self._save_checkpoint(tag="final")
         self.logger.close()
-        print(f"\n[PPOTrainer] Done — {self.global_step:,} steps")
-
-    # ─────────────────────────────────────────────────────────────────────────
-    # PPO update  (coefficients from rsl_rl_ppo_cfg.py)
-    # ─────────────────────────────────────────────────────────────────────────
+        print(f"\n[PPOTrainer] Done - {self.global_step:,} steps")
 
     def _ppo_update(self):
         cfg = self.cfg
@@ -232,7 +210,7 @@ class PPOTrainer:
 
         pol_losses, val_losses, entropies, clip_fracs, kls = [], [], [], [], []
 
-        for _ in range(cfg.n_epochs):  # num_learning_epochs=5
+        for _ in range(cfg.n_epochs):
             for batch in self.buffer.get_mini_batches(cfg.batch_size):
                 obs        = batch["obs"]
                 actions    = batch["actions"]
@@ -252,18 +230,16 @@ class PPOTrainer:
                 surr2 = ratio.clamp(1 - cfg.clip_eps, 1 + cfg.clip_eps) * advantages
                 policy_loss = -torch.min(surr1, surr2).mean()
 
-                # Clipped value loss (use_clipped_value_loss=True)
-                v_clipped   = old_values + (new_values - old_values).clamp(-cfg.clip_eps, cfg.clip_eps)
-                v_loss      = torch.max(
+                # Clipped value loss
+                v_clipped  = old_values + (new_values - old_values).clamp(-cfg.clip_eps, cfg.clip_eps)
+                v_loss     = torch.max(
                     (new_values - returns).pow(2),
                     (v_clipped  - returns).pow(2)
                 ).mean()
-                value_loss  = 0.5 * v_loss 
+                value_loss = 0.5 * v_loss
 
-                # Entropy
                 entropy_loss = -entropy.mean()
 
-                # Total loss — value_loss_coef=1.0, entropy_coef=0.01
                 loss = (
                     policy_loss
                     + cfg.value_coef   * value_loss
@@ -274,20 +250,19 @@ class PPOTrainer:
                 loss.backward()
                 grad_norm = nn.utils.clip_grad_norm_(self.policy.parameters(), cfg.max_grad_norm)
                 if grad_norm > 1.0:
-                    print(f"  [GRAD] norm={grad_norm:.2f} — clipped")
+                    print(f"  [GRAD] norm={grad_norm:.2f} - clipped")
                 self.optimizer.step()
-
 
                 with torch.no_grad():
                     has_nan = any(p.isnan().any() for p in self.policy.parameters())
                     if has_nan:
-                        print("  [NaN] detected in policy weights — stopping update")
+                        print("  [NaN] detected in policy weights - stopping update")
                         break
 
                     approx_kl = ((ratio - 1) - log_ratio).mean().item()
                     clip_frac  = ((ratio - 1).abs() > cfg.clip_eps).float().mean().item()
 
-                    # Detect KL spike — print per-joint std at the moment of explosion
+                    # Print per-joint std if KL spikes unexpectedly
                     if approx_kl > 0.1:
                         _lsv = self.policy.log_std_value
                         print(
@@ -310,10 +285,6 @@ class PPOTrainer:
             "update/clip_frac":   np.mean(clip_fracs),
             "update/approx_kl":   np.mean(kls),
         }
-
-    # ─────────────────────────────────────────────────────────────────────────
-    # Evaluation
-    # ─────────────────────────────────────────────────────────────────────────
 
     def _evaluate(self):
         self.policy.eval()
@@ -339,10 +310,6 @@ class PPOTrainer:
             "mean_dist":    float(np.mean(dists)),
         }
 
-    # ─────────────────────────────────────────────────────────────────────────
-    # Checkpoint
-    # ─────────────────────────────────────────────────────────────────────────
-
     def _save_checkpoint(self, tag=""):
         tag_str = f"_{tag}" if tag else f"_step{self.global_step}"
         path = os.path.join(
@@ -356,7 +323,7 @@ class PPOTrainer:
             "policy_state_dict":     self.policy.state_dict(),
             "optimizer_state_dict":  self.optimizer.state_dict(),
         }, path)
-        print(f"  [Checkpoint] → {path}")
+        print(f"  [Checkpoint] -> {path}")
 
     def load_checkpoint(self, path: str):
         ckpt = torch.load(path, map_location=self.device)
@@ -368,10 +335,6 @@ class PPOTrainer:
         for pg in self.optimizer.param_groups:
             pg["lr"] = self.current_lr
         print(f"[PPOTrainer] Loaded {path} (step {self.global_step:,})")
-
-    # ─────────────────────────────────────────────────────────────────────────
-    # Env factory
-    # ─────────────────────────────────────────────────────────────────────────
 
     def _make_envs(self):
         cfg = self.cfg
