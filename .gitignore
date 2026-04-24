@@ -1,23 +1,15 @@
-# Training outputs (can be large)
-logs/
+.vscode/
+videos/
+result_plots/
 checkpoints/
+logs/
 __pycache__/
 *.pyc
-*.pyo
 *.pt
-*.pth
-
-# Python env
+*.db
+*.pdf
+*.png
+*.STL
 *.egg-info/
-.env
-.venv
-
-# Editor
-.vscode/
-.idea/
-
-# OS
 .DS_Store
-videos/
-*.mp4
-*.avi
+MUJOCO_LOG.TXT
