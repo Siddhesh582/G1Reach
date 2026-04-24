@@ -3,6 +3,8 @@
 PPO-based end-effector reaching for the Unitree G1 humanoid (29 DOF) in MuJoCo.
 CS 5180 - Reinforcement Learning | Siddhesh Santosh Shingate
 
+![G1Reach demo](demo.gif)
+
 ## Setup
 
 ```bash
